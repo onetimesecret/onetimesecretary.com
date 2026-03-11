@@ -1,0 +1,6 @@
+---
+import UseCaseLayout from '../../layouts/UseCase.astro';
+import { getUseCase } from '../../content/usecases';
+const usecase = getUseCase('hr')!;
+---
+<UseCaseLayout usecase={usecase} />
