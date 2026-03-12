@@ -1,0 +1,150 @@
+name: Lighthouse CI Test
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lighthouse:
+    name: Lighthouse Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10.11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build site
+        run: pnpm build
+
+      - name: Run Lighthouse CI
+        run: pnpm dlx @lhci/cli@0.15.x autorun
+        env:
+          CI: true
+          LHCI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Lighthouse reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          path: .lighthouseci/
+          if-no-files-found: warn
+          retention-days: 14
+        if: always()
+
+      - name: Comment on PR with Lighthouse results
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            try {
+              const reportDir = '.lighthouseci';
+              const manifestPath = path.join(reportDir, 'manifest.json');
+
+              if (!fs.existsSync(manifestPath)) {
+                console.log('No Lighthouse manifest found.');
+                const runId = context.runId;
+                const repoUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: `## Lighthouse Audit Results\n\n` +
+                        `No Lighthouse results were produced. The build or audit step may have failed.\n\n` +
+                        `[View Workflow Run](${repoUrl}/actions/runs/${runId})`
+                });
+                return;
+              }
+
+              const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+              const representativeRuns = manifest.filter(entry => entry.isRepresentativeRun);
+
+              if (representativeRuns.length === 0) {
+                console.log('No representative runs found in manifest.');
+                return;
+              }
+
+              let comment = `## Lighthouse Audit Results\n\n`;
+
+              for (const run of representativeRuns) {
+                const lhr = JSON.parse(fs.readFileSync(path.join(reportDir, run.jsonPath), 'utf8'));
+                const formFactor = lhr.configSettings.formFactor || 'unknown';
+
+                comment += `### ${formFactor.charAt(0).toUpperCase() + formFactor.slice(1)} Results\n\n`;
+
+                const scores = {
+                  'Performance': lhr.categories.performance.score,
+                  'Accessibility': lhr.categories.accessibility.score,
+                  'Best Practices': lhr.categories['best-practices'].score,
+                  'SEO': lhr.categories.seo.score
+                };
+
+                comment += `| Category | Score |\n| --- | --- |\n`;
+                for (const [category, score] of Object.entries(scores)) {
+                  const percentage = Math.round(score * 100);
+                  comment += `| ${category} | ${percentage} |\n`;
+                }
+
+                comment += `\n**Core Web Vitals**\n\n`;
+                const metrics = {
+                  'First Contentful Paint': lhr.audits['first-contentful-paint'],
+                  'Largest Contentful Paint': lhr.audits['largest-contentful-paint'],
+                  'Cumulative Layout Shift': lhr.audits['cumulative-layout-shift'],
+                  'Total Blocking Time': lhr.audits['total-blocking-time']
+                };
+
+                comment += `| Metric | Value |\n| --- | --- |\n`;
+                for (const [name, audit] of Object.entries(metrics)) {
+                  comment += `| ${name} | ${audit.displayValue || 'N/A'} |\n`;
+                }
+
+                comment += `\n---\n\n`;
+              }
+
+              const runId = context.runId;
+              const repoUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
+              comment += `[Download Detailed Reports](${repoUrl}/actions/runs/${runId})\n`;
+
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+
+            } catch (error) {
+              console.error('Error creating Lighthouse comment:', error);
+              try {
+                const runId = context.runId;
+                const repoUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: `## Lighthouse Audit Results\n\n` +
+                        `Unable to parse Lighthouse results automatically.\n\n` +
+                        `[Download Full Reports](${repoUrl}/actions/runs/${runId})\n\n` +
+                        `Error: ${error.message}`
+                });
+              } catch (commentError) {
+                console.error('Failed to post fallback comment:', commentError);
+              }
+            }
