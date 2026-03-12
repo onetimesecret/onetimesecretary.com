@@ -1,0 +1,73 @@
+# .github/workflows/deploy.yml
+#
+# Build and deploy to GitHub Pages.
+#
+# DEPENDENCY UPDATE BEHAVIOR:
+# - Dependabot and Renovate PRs use 'deps/' branch prefix and 'deps:' commit prefix
+# - Deploy is skipped for dependency updates to avoid unnecessary deployments
+
+name: Build and Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.30.3
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.x
+          cache: pnpm
+      - run: pnpm install
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./dist
+          include-hidden-files: true
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist-files
+          path: ./dist
+          retention-days: 7
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'deps:')
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
