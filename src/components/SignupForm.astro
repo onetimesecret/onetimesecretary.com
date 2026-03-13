@@ -6,34 +6,59 @@ interface Props {
 const { class: className = '' } = Astro.props;
 ---
 
-<form data-signup class:list={['flex gap-2 max-w-md mx-auto max-sm:flex-col', className]}>
-  <input
-    type="email"
-    required
-    placeholder="you@company.com"
-    aria-label="Email address"
-    class="flex-1 rounded-lg border border-white/15 bg-white/6 px-5 py-3.5 font-body text-cream placeholder:text-cream/40 outline-none transition focus:border-gold"
-  />
-  <button
-    type="submit"
-    class="rounded-lg bg-gold px-6 py-3.5 font-semibold text-navy-dark transition hover:bg-gold-light hover:-translate-y-px shrink-0"
-  >
-    Notify Me
-  </button>
+<form data-signup class:list={['max-w-md mx-auto', className]}>
+  <div class="flex gap-2 max-sm:flex-col">
+    <input
+      type="email"
+      name="fields[email]"
+      required
+      placeholder="you@company.com"
+      aria-label="Email address"
+      autocomplete="email"
+      class="flex-1 rounded-lg border border-border-inv/15 bg-white/6 px-5 py-3.5 font-body text-text-inverse placeholder:text-text-inverse/40 outline-none transition focus:border-accent"
+    />
+    <button
+      type="submit"
+      class="rounded-lg bg-accent px-6 py-3.5 font-semibold text-accent-on transition hover:bg-accent-hover hover:-translate-y-px shrink-0"
+    >
+      Notify Me
+    </button>
+  </div>
+  <p class="mt-3 text-xs text-text-inverse/50">This is not a newsletter. See our <a href="https://docs.onetimesecret.com/en/principles/communication/" target="_blank" rel="noopener" class="underline hover:text-text-inverse/70">Communication Principles</a> and <a href="https://onetimesecret.com/info/privacy" target="_blank" rel="noopener" class="underline hover:text-text-inverse/70">Privacy Policy</a>.</p>
 </form>
 
 <script>
+  const ML_FORM_URL = 'https://assets.mailerlite.com/jsonp/2184301/forms/181738487029957857/subscribe';
+
   document.querySelectorAll('[data-signup]').forEach(form => {
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const input = form.querySelector('input') as HTMLInputElement;
       const btn = form.querySelector('button') as HTMLButtonElement;
-      if (input && btn) {
-        btn.textContent = "You're on the list";
-        btn.disabled = true;
-        input.disabled = true;
-        input.value = '';
-        input.placeholder = 'Check your inbox for confirmation';
+      if (!input || !btn) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+
+      const body = new FormData();
+      body.append('fields[email]', input.value);
+      body.append('ml-submit', '1');
+      body.append('anticsrf', 'true');
+
+      try {
+        const res = await fetch(ML_FORM_URL, { method: 'POST', body });
+        if (res.ok) {
+          btn.textContent = "You're on the list";
+          input.disabled = true;
+          input.value = '';
+          input.placeholder = 'Check your inbox to confirm';
+        } else {
+          btn.textContent = 'Try again';
+          btn.disabled = false;
+        }
+      } catch {
+        btn.textContent = 'Try again';
+        btn.disabled = false;
       }
     });
   });
